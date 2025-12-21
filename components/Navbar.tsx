@@ -1,60 +1,145 @@
 "use client";
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 
-// DATA AWAL (DUMMY)
-const initialBookings = [
-  {
-    id: "#10856",
-    date: "Dec 11, 2025 12:58",
-    amount: "Rp 854.700",
-    status: "Waiting Your Payment",
-    statusColor: "text-blue-600",
-    bgStatus: "bg-blue-50",
-    hotel: "Singa Ambara Suites",
-    address: "Jl. Udayana No.26, Buleleng, Bali 80228",
-    checkIn: "20 Dec 2025",
-    checkOut: "22 Dec 2025",
-    roomType: "Panji Room (Superior)",
-    nights: 2,
-    guest: "Juli Widiasari"
-  },
-  {
-    id: "#10855",
-    date: "Dec 11, 2025 12:57",
-    amount: "Rp 854.700",
-    status: "Failed",
-    statusColor: "text-red-600",
-    bgStatus: "bg-red-50",
-    hotel: "Singa Ambara Suites",
-    address: "Jl. Udayana No.26, Buleleng, Bali 80228",
-    checkIn: "15 Dec 2025",
-    checkOut: "17 Dec 2025",
-    roomType: "Lovina Room (Deluxe)",
-    nights: 2,
-    guest: "Juli Widiasari"
-  }
-];
+// --- TYPE DEFINITIONS ---
+interface Booking {
+  id: string; 
+  originalId: number; 
+  date: string;
+  amount: string;
+  status: string;
+  statusColor: string;
+  bgStatus: string;
+  hotel: string;
+  address: string;
+  checkIn: string;
+  checkOut: string;
+  roomType: string;
+  nights: number;
+  guest: string;
+  paymentMethod: string;
+  phoneNumber: string;
+}
 
 export default function Navbar() {
   const pathname = usePathname();
-  const [activeSection, setActiveSection] = useState('home');
+  const router = useRouter();
+
+  // ============================================================
+  // 1. LOGIKA HIDE: JANGAN TAMPIL DI HALAMAN ADMIN
+  // Navbar Tamu ini akan menghilang jika URL diawali '/admin'
+  // ============================================================
+  if (pathname?.startsWith('/admin')) {
+    return null; 
+  }
   
-  // STATE SIDEBAR
+  // STATE NAVIGASI
+  const [activeSection, setActiveSection] = useState('home');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeMenu, setActiveMenu] = useState("booking"); 
+  const [activeMenu, setActiveMenu] = useState<"booking" | "profile">("booking"); 
+
+  // STATE USER
+  const [userName, setUserName] = useState<string | null>(null);
   
   // STATE DATA BOOKING
-  const [bookings, setBookings] = useState(initialBookings);
-  const [selectedBooking, setSelectedBooking] = useState<any>(null);
-
-  // STATE PEMBAYARAN
+  const [bookings, setBookings] = useState<Booking[]>([]); 
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  
+  // STATE PEMBAYARAN (Simulasi Client-Side)
   const [paymentStep, setPaymentStep] = useState<'none' | 'select' | 'processing' | 'success'>('none');
   const [paymentMethod, setPaymentMethod] = useState("BCA Virtual Account");
 
-  // Scroll Spy Logic
+  // ==========================================
+  // 2. SINYAL LOGIN/LOGOUT
+  // ==========================================
+  useEffect(() => {
+    const checkLoginStatus = () => {
+      const storedUser = localStorage.getItem("user_name");
+      const storedToken = localStorage.getItem("token");
+      
+      if (storedUser && storedToken) {
+        setUserName(storedUser);
+      } else {
+        setUserName(null);
+      }
+    };
+
+    checkLoginStatus();
+    window.addEventListener("auth-change", checkLoginStatus);
+    return () => {
+      window.removeEventListener("auth-change", checkLoginStatus);
+    };
+  }, []);
+
+  // ==========================================
+  // 3. FETCH REAL DATA SAAT SIDEBAR DIBUKA
+  // ==========================================
+  useEffect(() => {
+    if (isSidebarOpen && activeMenu === 'booking' && userName) {
+      fetchRealBookings();
+    }
+  }, [isSidebarOpen, activeMenu, userName]);
+
+  const fetchRealBookings = async () => {
+    setIsLoadingData(true);
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+      const res = await fetch(`${apiUrl}/my-bookings`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        
+        const mappedData: Booking[] = data.map((item: any) => {
+           let statusColor = "text-green-600";
+           let bgStatus = "bg-green-50";
+           
+           if (item.status === 'pending') {
+              statusColor = "text-yellow-600";
+              bgStatus = "bg-yellow-50";
+           } else if (item.status === 'cancelled') {
+              statusColor = "text-red-600";
+              bgStatus = "bg-red-50";
+           }
+
+           return {
+              id: `#${item.id}`,
+              originalId: item.id,
+              date: new Date(item.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute:'2-digit'}),
+              amount: new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(item.total_price),
+              status: item.status.charAt(0).toUpperCase() + item.status.slice(1), 
+              statusColor: statusColor,
+              bgStatus: bgStatus,
+              hotel: "Singa Ambara Suites",
+              address: "Jl. Udayana No.26, Buleleng, Bali",
+              checkIn: item.check_in,
+              checkOut: item.check_out,
+              roomType: item.room ? item.room.name : "Unknown Room",
+              nights: item.total_days || 1,
+              guest: item.guest_name || userName || "Guest",
+              paymentMethod: item.payment_method || 'Bayar di Hotel',
+              phoneNumber: item.phone_number || '-'
+           };
+        });
+
+        setBookings(mappedData);
+      }
+    } catch (err) {
+      console.error("Gagal ambil booking:", err);
+    } finally {
+      setIsLoadingData(false);
+    }
+  };
+
+  // 4. SCROLL SPY LOGIC
   useEffect(() => {
     if (pathname !== '/') return;
     const handleScroll = () => {
@@ -73,6 +158,16 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [pathname]);
 
+  // 5. RESET STATE SAAT SIDEBAR DITUTUP
+  useEffect(() => {
+    if (!isSidebarOpen) {
+      setTimeout(() => {
+        setSelectedBooking(null);
+        setPaymentStep('none');
+      }, 300);
+    }
+  }, [isSidebarOpen]);
+
   const getLinkClass = (target: string) => {
     if (target === '/rooms' && pathname === '/rooms') {
        return "text-white font-bold border-b-2 border-[#D4AF37] pb-1 text-sm uppercase tracking-widest cursor-pointer";
@@ -83,44 +178,28 @@ export default function Navbar() {
       : "text-gray-400 hover:text-white font-medium text-sm uppercase tracking-widest cursor-pointer transition duration-300";
   };
 
-  // Reset saat sidebar tutup
-  useEffect(() => {
-    if (!isSidebarOpen) {
-      setSelectedBooking(null);
-      setPaymentStep('none');
-    }
-  }, [isSidebarOpen]);
+  const handleLogout = () => {
+    localStorage.removeItem("user_name");
+    localStorage.removeItem("token");
+    window.dispatchEvent(new Event("auth-change")); 
+    setUserName(null);
+    setIsSidebarOpen(false);
+    alert("Logout Berhasil!");
+    router.push("/");
+  };
 
-  // FUNGSI PROSES BAYAR
   const handleProcessPayment = () => {
+    if (!selectedBooking) return;
     setPaymentStep('processing');
     
-    // Simulasi loading 2 detik
     setTimeout(() => {
       setPaymentStep('success');
-      
-      // Update status di database lokal (state)
-      const updatedBookings = bookings.map(b => {
-        if (b.id === selectedBooking.id) {
-          return { 
-            ...b, 
-            status: "Paid", 
-            statusColor: "text-green-600", 
-            bgStatus: "bg-green-50" 
-          };
-        }
-        return b;
-      });
-      setBookings(updatedBookings);
-      
-      // Update yang sedang dilihat juga
-      setSelectedBooking((prev: any) => ({
+      setSelectedBooking(prev => prev ? ({
         ...prev,
         status: "Paid",
         statusColor: "text-green-600",
         bgStatus: "bg-green-50"
-      }));
-
+      }) : null);
     }, 2000);
   };
 
@@ -132,10 +211,17 @@ export default function Navbar() {
           <div className="flex justify-between h-20 items-center">
             
             <div className="flex items-center gap-6">
-              <button onClick={() => setIsSidebarOpen(true)} className="text-white hover:text-[#D4AF37] focus:outline-none transition">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+              <button 
+                onClick={() => setIsSidebarOpen(true)}
+                className="text-white hover:text-[#D4AF37] focus:outline-none transition p-1"
+              >
+                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                </svg>
               </button>
-              <Link href="/" className="text-2xl font-serif text-white tracking-wide">Singa Ambara Suites</Link>
+              <Link href="/" className="text-2xl font-serif text-white tracking-wide hover:text-gray-200 transition">
+                Singa Ambara Suites
+              </Link>
             </div>
             
             <div className="hidden md:flex space-x-12">
@@ -146,175 +232,266 @@ export default function Navbar() {
             </div>
 
             <div className="flex-shrink-0">
-              <Link href="/login" className="bg-[#9F8034] hover:bg-[#8A6E2A] text-white px-6 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 transition duration-300">
-                Register / Sign In <span className="text-lg">→</span>
-              </Link>
+              {userName ? (
+                <div onClick={() => setIsSidebarOpen(true)} className="flex items-center gap-3 cursor-pointer group">
+                  <div className="text-right hidden md:block">
+                    <p className="text-[#D4AF37] text-xs font-bold uppercase tracking-wider group-hover:text-white transition">Welcome</p>
+                    <p className="text-white text-sm font-medium">{userName}</p>
+                  </div>
+                  <div className="w-10 h-10 rounded-full bg-[#1A2225] border border-[#D4AF37] flex items-center justify-center text-[#D4AF37] group-hover:bg-[#D4AF37] group-hover:text-[#1A2225] transition">
+                    <span className="font-bold text-lg">{userName.charAt(0)}</span>
+                  </div>
+                </div>
+              ) : (
+                <Link href="/login" className="bg-[#9F8034] hover:bg-[#8A6E2A] text-white px-6 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 transition duration-300 shadow-lg">
+                  Register / Sign In <span className="text-lg">→</span>
+                </Link>
+              )}
             </div>
+
           </div>
         </div>
       </nav>
 
-
-      {/* ================= SIDEBAR (MEMBER AREA) ================= */}
+      {/* ================= SIDEBAR ================= */}
       {isSidebarOpen && (
-        <div className="fixed inset-0 bg-black/70 z-[60] backdrop-blur-sm transition-opacity" onClick={() => setIsSidebarOpen(false)}></div>
+        <div 
+          className="fixed inset-0 bg-black/70 z-[60] backdrop-blur-sm transition-opacity duration-300" 
+          onClick={() => setIsSidebarOpen(false)}
+        />
       )}
 
-      <div className={`fixed top-0 left-0 h-full w-[450px] max-w-[90vw] bg-white z-[70] shadow-2xl transform transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className={`fixed top-0 left-0 h-full w-[500px] max-w-[85vw] bg-white z-[70] shadow-2xl transform transition-transform duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         
         {/* Header Sidebar */}
-        <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-white sticky top-0 z-10">
-          <h2 className="text-xl font-bold text-gray-800">Member Area</h2>
-          <button onClick={() => setIsSidebarOpen(false)} className="text-gray-500 hover:text-red-600">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+          <div className="flex items-center gap-3">
+             <div className="w-10 h-10 rounded-full bg-[#0B1215] text-[#D4AF37] flex items-center justify-center font-bold">
+                {userName ? userName.charAt(0) : "G"}
+             </div>
+             <div>
+                <h2 className="text-lg font-bold text-gray-800 leading-tight">
+                    {userName || "Guest User"}
+                </h2>
+                <p className="text-xs text-gray-500">Member Area</p>
+             </div>
+          </div>
+          <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-red-500 transition p-2 bg-white rounded-full shadow-sm">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
 
-        <div className="flex h-full">
+        {/* Body Sidebar */}
+        <div className="flex flex-1 overflow-hidden">
           
           {/* MENU KIRI */}
-          <div className="w-1/3 bg-gray-50 border-r border-gray-200 py-6 flex flex-col gap-2 h-full">
+          <div className="w-1/3 bg-gray-50 border-r border-gray-200 py-6 flex flex-col gap-1 h-full">
             <button 
               onClick={() => {setActiveMenu('booking'); setSelectedBooking(null); setPaymentStep('none');}}
-              className={`text-left px-4 py-3 text-sm font-medium ${activeMenu === 'booking' ? 'bg-white text-[#D4AF37] border-l-4 border-[#D4AF37] shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+              className={`text-left px-5 py-3 text-sm font-medium transition-all duration-200 border-l-4 ${activeMenu === 'booking' ? 'bg-white text-[#9F8034] border-[#9F8034] shadow-sm' : 'border-transparent text-gray-600 hover:bg-gray-200'}`}
             >
-              My Booking
+              📅 My Booking
             </button>
             <button 
               onClick={() => {setActiveMenu('profile'); setSelectedBooking(null);}}
-              className={`text-left px-4 py-3 text-sm font-medium ${activeMenu === 'profile' ? 'bg-white text-[#D4AF37] border-l-4 border-[#D4AF37] shadow-sm' : 'text-gray-600 hover:bg-gray-200'}`}
+              className={`text-left px-5 py-3 text-sm font-medium transition-all duration-200 border-l-4 ${activeMenu === 'profile' ? 'bg-white text-[#9F8034] border-[#9F8034] shadow-sm' : 'border-transparent text-gray-600 hover:bg-gray-200'}`}
             >
-              Change Profile
+              👤 Edit Profile
             </button>
-            <button onClick={() => alert("Logout berhasil!")} className="text-left px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 mt-auto mb-32">Logout</button>
+
+            {/* --- TOMBOL RAHASIA ADMIN --- */}
+            {/* Hanya muncul jika nama user adalah 'Resepsionis' */}
+            {userName === "Resepsionis" && (
+                <Link 
+                    href="/admin/dashboard" 
+                    onClick={() => setIsSidebarOpen(false)}
+                    className="text-left px-5 py-3 text-sm font-bold text-red-600 border-l-4 border-transparent hover:bg-red-50 transition flex items-center gap-2 mt-4"
+                >
+                    👮‍♂️ Admin Panel
+                </Link>
+            )}
+            
+            <div className="mt-auto px-5 pb-8">
+                {userName ? (
+                   <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition border border-red-200">
+                     🚪 Logout
+                   </button>
+                ) : (
+                   <Link href="/login" className="block w-full text-center px-4 py-2 text-sm font-bold text-white bg-[#0B1215] hover:bg-black rounded-md transition">
+                     Login Now
+                   </Link>
+                )}
+            </div>
           </div>
 
           {/* KONTEN KANAN */}
-          <div className="w-2/3 p-6 overflow-y-auto bg-white pb-32">
+          <div className="w-2/3 p-6 overflow-y-auto bg-white pb-20 relative">
             
             {/* --- KONTEN: MY BOOKING --- */}
             {activeMenu === 'booking' && (
-              <>
-                {/* 1. LIST BOOKING */}
-                {!selectedBooking ? (
-                  <div className="space-y-4 animate-fadeIn">
-                    <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Riwayat Booking</h3>
+              <div className="transition-opacity duration-300 ease-in opacity-100">
+                  {!userName ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-center">
+                        <span className="text-4xl mb-2">🔒</span>
+                        <p className="text-gray-500 text-sm">Silakan Login untuk melihat riwayat.</p>
+                    </div>
+                  ) : isLoadingData ? (
+                    <div className="flex flex-col items-center justify-center h-64">
+                       <div className="w-8 h-8 border-4 border-gray-200 border-t-[#9F8034] rounded-full animate-spin mb-2"></div>
+                       <p className="text-xs text-gray-400">Mengambil data...</p>
+                    </div>
+                  ) : bookings.length === 0 ? (
+                    <div className="text-center mt-10">
+                        <p className="text-gray-500 text-sm mb-2">Belum ada booking.</p>
+                        <Link href="/rooms" onClick={() => setIsSidebarOpen(false)} className="text-[#9F8034] text-xs font-bold underline">Cari kamar sekarang</Link>
+                    </div>
+                  ) : !selectedBooking ? (
+                  // LIST BOOKING
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-bold text-gray-800 mb-4 border-b border-gray-100 pb-2 flex justify-between items-center">
+                        Riwayat Booking
+                        <span className="text-xs bg-gray-100 px-2 py-1 rounded-full text-gray-500 font-normal">{bookings.length} Transaksi</span>
+                    </h3>
+                    
                     {bookings.map((booking, idx) => (
-                      <div key={idx} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 text-sm hover:border-[#D4AF37] transition">
-                        <div className="mb-2">
-                          <p className="font-bold text-gray-900">{booking.hotel}</p>
-                          <p className="text-xs text-gray-500 truncate">{booking.address}</p>
+                      <div key={idx} className="group bg-white p-4 rounded-xl shadow-sm border border-gray-200 text-sm hover:border-[#9F8034] hover:shadow-md transition cursor-pointer" onClick={() => setSelectedBooking(booking)}>
+                        <div className="flex justify-between items-start mb-2">
+                           <div className="font-bold text-gray-800 truncate pr-2">{booking.hotel}</div>
+                           <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded whitespace-nowrap ${booking.bgStatus} ${booking.statusColor}`}>{booking.status}</span>
                         </div>
-                        <div className="border-t border-gray-100 my-2 pt-2 space-y-1">
-                          <div className="flex justify-between"><span className="text-gray-500 text-xs">No. Invoice</span><span className="font-medium text-gray-800">{booking.id}</span></div>
-                          <div className="flex justify-between"><span className="text-gray-500 text-xs">Amount</span><span className="font-bold text-gray-800">{booking.amount}</span></div>
-                          <div className="flex justify-between items-center mt-3">
-                            <span className={`font-bold text-[10px] uppercase px-2 py-1 rounded ${booking.bgStatus} ${booking.statusColor}`}>{booking.status}</span>
-                            <button onClick={() => setSelectedBooking(booking)} className="bg-[#9F8034] text-white text-xs px-4 py-1.5 rounded hover:bg-[#8A6E2A] transition">Select &rarr;</button>
-                          </div>
+                        <p className="text-xs text-gray-500 mb-3 truncate">{booking.roomType}</p>
+                        
+                        <div className="flex justify-between items-end border-t border-dashed border-gray-200 pt-3">
+                            <div>
+                                <p className="text-[10px] text-gray-400">Total Bayar</p>
+                                <p className="font-bold text-gray-800">{booking.amount}</p>
+                            </div>
+                            <span className="text-[#9F8034] text-xs font-bold group-hover:translate-x-1 transition-transform">Detail &rarr;</span>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  
-                  /* 2. DETAIL BOOKING (INVOICE) */
-                  <div className="animate-slideIn">
-                    {/* Tombol Back */}
-                    {paymentStep === 'none' && (
-                      <button onClick={() => setSelectedBooking(null)} className="text-sm text-gray-500 hover:text-[#D4AF37] mb-4 flex items-center gap-1">&larr; Kembali ke List</button>
-                    )}
+                  // DETAIL BOOKING (INVOICE)
+                  <div className="transition-all duration-300">
+                    <button onClick={() => setSelectedBooking(null)} className="text-xs font-bold text-gray-500 hover:text-[#9F8034] mb-4 flex items-center gap-1 transition">
+                        &larr; Kembali ke List
+                    </button>
 
-                    {/* TAMPILAN PEMBAYARAN */}
                     {paymentStep === 'select' ? (
-                      <div className="animate-fadeIn">
-                         <h3 className="font-bold text-lg text-gray-900 mb-4">Pilih Pembayaran</h3>
-                         <div className="space-y-3 mb-6">
+                      <div className="animate-pulse-once">
+                          <h3 className="font-bold text-lg text-gray-900 mb-1">Pilih Pembayaran</h3>
+                          <div className="space-y-3 mb-6">
                             {['BCA Virtual Account', 'Mandiri Virtual Account', 'GoPay', 'OVO'].map((method) => (
-                              <label key={method} className={`flex items-center p-3 border rounded-lg cursor-pointer transition ${paymentMethod === method ? 'border-[#D4AF37] bg-yellow-50' : 'border-gray-200 hover:bg-gray-50'}`}>
-                                <input type="radio" name="payment" className="accent-[#D4AF37]" checked={paymentMethod === method} onChange={() => setPaymentMethod(method)} />
+                              <label key={method} className={`flex items-center p-3 border rounded-lg cursor-pointer transition ${paymentMethod === method ? 'border-[#9F8034] bg-yellow-50 shadow-sm' : 'border-gray-200 hover:bg-gray-50'}`}>
+                                <input type="radio" name="payment" className="accent-[#9F8034]" checked={paymentMethod === method} onChange={() => setPaymentMethod(method)} />
                                 <span className="ml-3 text-sm text-gray-700 font-medium">{method}</span>
                               </label>
                             ))}
-                         </div>
-                         <button onClick={handleProcessPayment} className="w-full bg-[#0B1215] text-white py-3 rounded font-bold text-sm hover:bg-black transition">Bayar Sekarang</button>
-                         <button onClick={() => setPaymentStep('none')} className="w-full text-gray-500 py-3 text-sm hover:text-gray-800 mt-2">Batal</button>
+                          </div>
+                          <button onClick={handleProcessPayment} className="w-full bg-[#0B1215] text-white py-3 rounded-lg font-bold text-sm hover:bg-black transition shadow-lg">Bayar Sekarang</button>
+                          <button onClick={() => setPaymentStep('none')} className="w-full text-gray-500 py-3 text-sm hover:text-red-600 mt-2 transition">Batal</button>
                       </div>
                     ) : paymentStep === 'processing' ? (
-                      <div className="flex flex-col items-center justify-center py-10 animate-fadeIn">
-                        <div className="w-10 h-10 border-4 border-gray-200 border-t-[#D4AF37] rounded-full animate-spin mb-4"></div>
-                        <p className="text-gray-600 text-sm">Memproses Pembayaran...</p>
+                      <div className="flex flex-col items-center justify-center py-20">
+                        <div className="w-12 h-12 border-4 border-gray-200 border-t-[#9F8034] rounded-full animate-spin mb-4"></div>
+                        <p className="text-gray-800 font-bold text-sm">Memproses Pembayaran...</p>
                       </div>
                     ) : (
-                      /* TAMPILAN INVOICE NORMAL / SUKSES */
-                      <div className="border border-gray-200 rounded-xl p-5 shadow-lg relative overflow-hidden bg-white">
-                        <div className={`absolute top-0 left-0 w-full h-2 ${paymentStep === 'success' || selectedBooking.status === 'Paid' ? 'bg-green-500' : 'bg-[#D4AF37]'}`}></div>
+                      <div className="border border-gray-200 rounded-xl shadow-lg relative overflow-hidden bg-white">
+                        <div className={`h-2 w-full ${selectedBooking.status === 'Paid' || paymentStep === 'success' ? 'bg-green-500' : 'bg-[#9F8034]'}`}></div>
                         
-                        {/* Pesan Sukses (Jika baru bayar) */}
-                        {paymentStep === 'success' && (
-                           <div className="bg-green-100 text-green-700 px-3 py-2 rounded text-xs font-bold text-center mb-4 border border-green-200">
-                             ✅ Pembayaran Berhasil!
-                           </div>
-                        )}
+                        <div className="p-5">
+                            {paymentStep === 'success' && (
+                               <div className="bg-green-50 text-green-700 px-4 py-2 rounded-lg text-xs font-bold text-center mb-5 border border-green-200">
+                                  ✅ Pembayaran Berhasil!
+                               </div>
+                            )}
 
-                        <div className="flex justify-between items-start mb-4 mt-2">
-                          <div>
-                            <h3 className="font-bold text-lg text-gray-900">INVOICE</h3>
-                            <p className="text-xs text-gray-500">{selectedBooking.id}</p>
-                          </div>
-                          <div className={`text-xs font-bold px-2 py-1 rounded ${selectedBooking.bgStatus} ${selectedBooking.statusColor}`}>
-                            {selectedBooking.status}
-                          </div>
+                            {/* Header Invoice */}
+                            <div className="flex justify-between items-start mb-6">
+                              <div>
+                                <h3 className="font-bold text-xl text-gray-900 tracking-tight">INVOICE</h3>
+                                <p className="text-xs text-gray-400 mt-1 font-mono">{selectedBooking.id}</p>
+                              </div>
+                              <div className={`text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider ${selectedBooking.bgStatus} ${selectedBooking.statusColor}`}>
+                                {selectedBooking.status}
+                              </div>
+                            </div>
+
+                            <div className="space-y-5 text-sm text-gray-700">
+                              {/* Info Hotel */}
+                              <div className="bg-gray-50 p-4 rounded-lg border border-gray-100">
+                                <p className="font-bold text-gray-900 mb-1">{selectedBooking.hotel}</p>
+                                <p className="text-xs text-gray-500">{selectedBooking.address}</p>
+                              </div>
+                              
+                              {/* Tanggal */}
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="p-2 border border-gray-100 rounded">
+                                    <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Check-In</p>
+                                    <p className="font-bold text-gray-800">{selectedBooking.checkIn}</p>
+                                </div>
+                                <div className="p-2 border border-gray-100 rounded">
+                                    <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Check-Out</p>
+                                    <p className="font-bold text-gray-800">{selectedBooking.checkOut}</p>
+                                </div>
+                              </div>
+                              
+                              {/* Info Pembayaran Tambahan (NEW) */}
+                              <div className="grid grid-cols-2 gap-4 border-t border-dashed border-gray-200 pt-3">
+                                 <div>
+                                     <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Metode Bayar</p>
+                                     <p className="font-bold text-[#D4AF37]">{selectedBooking.paymentMethod}</p>
+                                 </div>
+                                 <div>
+                                     <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Kontak Tamu</p>
+                                     <p className="font-bold text-gray-800">{selectedBooking.phoneNumber}</p>
+                                 </div>
+                              </div>
+
+                              {/* Total */}
+                              <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                                <span className="font-bold text-gray-700">Total Tagihan</span>
+                                <span className="font-bold text-xl text-[#9F8034]">{selectedBooking.amount}</span>
+                              </div>
+                            </div>
+
+                            {/* Tombol Tutup */}
+                            {paymentStep === 'success' && (
+                              <button onClick={() => {setPaymentStep('none'); setSelectedBooking(null);}} className="w-full border border-gray-300 text-gray-600 py-3 rounded-lg mt-6 font-bold text-sm hover:bg-gray-50 transition">
+                                Tutup Invoice
+                              </button>
+                            )}
                         </div>
-
-                        <div className="space-y-4 text-sm text-gray-700">
-                          <div className="bg-gray-50 p-3 rounded">
-                            <p className="font-bold text-gray-900">{selectedBooking.hotel}</p>
-                            <p className="text-xs text-gray-500">{selectedBooking.address}</p>
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div><p className="text-xs text-gray-500">Check-In</p><p className="font-medium">{selectedBooking.checkIn}</p></div>
-                            <div><p className="text-xs text-gray-500">Check-Out</p><p className="font-medium">{selectedBooking.checkOut}</p></div>
-                          </div>
-                          <div><p className="text-xs text-gray-500">Tipe Kamar</p><p className="font-medium">{selectedBooking.roomType}</p></div>
-                          <div className="border-t border-dashed border-gray-300 pt-3 flex justify-between items-center">
-                            <span className="font-bold text-gray-600">Total</span>
-                            <span className="font-bold text-xl text-[#D4AF37]">{selectedBooking.amount}</span>
-                          </div>
-                        </div>
-                        
-                        {/* Tombol Bayar (Hanya muncul jika status Waiting & tidak sedang sukses) */}
-                        {selectedBooking.status === "Waiting Your Payment" && paymentStep !== 'success' && (
-                          <button onClick={() => setPaymentStep('select')} className="w-full bg-[#0B1215] text-white py-3 rounded mt-6 font-bold text-sm hover:bg-black transition">
-                            Bayar Sekarang
-                          </button>
-                        )}
-
-                        {/* Tombol Tutup setelah sukses */}
-                        {paymentStep === 'success' && (
-                          <button onClick={() => {setPaymentStep('none'); setSelectedBooking(null);}} className="w-full border border-gray-300 text-gray-600 py-3 rounded mt-6 font-bold text-sm hover:bg-gray-50 transition">
-                            Tutup
-                          </button>
-                        )}
                       </div>
                     )}
                   </div>
                 )}
-              </>
+              </div>
             )}
 
             {/* --- KONTEN: PROFILE --- */}
             {activeMenu === 'profile' && (
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Edit Profile</h3>
-                <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                  <div className="w-20 h-20 bg-gray-200 rounded-full mx-auto mb-4 overflow-hidden border-2 border-[#D4AF37]">
-                    <img src="https://ui-avatars.com/api/?name=Juli+Widiasari&background=random&size=128" alt="Profile" />
+              <div className="space-y-6 transition-opacity duration-300 ease-in opacity-100">
+                <h3 className="text-lg font-bold text-gray-800 mb-4 border-b border-gray-100 pb-2">Pengaturan Akun</h3>
+                
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                  <div className="flex flex-col items-center mb-6">
+                      <div className="w-24 h-24 bg-gray-100 rounded-full mb-3 overflow-hidden border-4 border-white shadow-md relative">
+                        <img src={`https://ui-avatars.com/api/?name=${userName || 'User'}&background=random&size=128`} alt="Profile" className="w-full h-full object-cover"/>
+                      </div>
                   </div>
-                  <div className="space-y-3">
-                    <div><label className="text-xs text-gray-500">Nama Lengkap</label><input type="text" value="Juli Widiasari" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-800" readOnly /></div>
-                    <div><label className="text-xs text-gray-500">Email</label><input type="email" value="juli@example.com" className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-800" readOnly /></div>
-                    <button className="w-full bg-[#9F8034] text-white py-2 rounded text-sm mt-4 font-bold hover:bg-[#8A6E2A]">Simpan Perubahan</button>
+                  
+                  <div className="space-y-4">
+                    <div>
+                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Nama Lengkap</label>
+                        <input type="text" value={userName || ""} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#9F8034]" readOnly />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Email</label>
+                        <input type="email" value="user@example.com" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#9F8034]" readOnly />
+                    </div>
                   </div>
                 </div>
               </div>

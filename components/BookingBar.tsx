@@ -111,7 +111,6 @@ export default function BookingBar() {
       <div className="bg-[#1A2225] border border-[#D4AF37]/30 p-4 md:p-6 rounded-xl shadow-2xl flex flex-col md:flex-row gap-4 items-center">
         
         {/* --- 1. DATE PICKER (REAL CALENDAR) --- */}
-        {/* Lebar diperbesar karena Promo Code hilang */}
         <div className="relative w-full md:w-[60%]" ref={dateRef}>
           <div 
             onClick={() => {setShowCalendar(!showCalendar); setShowGuest(false);}}
@@ -240,15 +239,27 @@ export default function BookingBar() {
           )}
         </div>
 
-        {/* --- 3. BUTTON CHECK --- */}
+        {/* --- 3. BUTTON CHECK (DENGAN VALIDASI) --- */}
         <div className="w-full md:w-[15%] h-[82px]">
-          <Link 
-            href="/rooms" 
-            className="w-full h-full bg-[#9F8034] hover:bg-[#8A6E2A] text-white font-bold rounded-lg flex flex-col items-center justify-center transition shadow-lg group"
-          >
-            <span className="uppercase tracking-widest text-sm mb-1">Check</span>
-            <span className="text-xs font-light opacity-80 group-hover:translate-x-1 transition">Availability &rarr;</span>
-          </Link>
+          {startDate && endDate ? (
+            // JIKA TANGGAL LENGKAP: Link Aktif (Emas)
+            <Link 
+              href="/rooms" 
+              className="w-full h-full bg-[#9F8034] hover:bg-[#8A6E2A] text-white font-bold rounded-lg flex flex-col items-center justify-center transition shadow-lg group"
+            >
+              <span className="uppercase tracking-widest text-sm mb-1">Check</span>
+              <span className="text-xs font-light opacity-80 group-hover:translate-x-1 transition">Availability &rarr;</span>
+            </Link>
+          ) : (
+            // JIKA BELUM LENGKAP: Tombol Mati (Abu-abu)
+            <button 
+              disabled
+              className="w-full h-full bg-gray-600 text-gray-400 font-bold rounded-lg flex flex-col items-center justify-center cursor-not-allowed border border-white/5"
+            >
+              <span className="uppercase tracking-widest text-sm mb-1">Check</span>
+              <span className="text-[10px] font-light">Pilih Tanggal Dulu</span>
+            </button>
+          )}
         </div>
 
       </div>

@@ -1,60 +1,85 @@
-"use client"; // Wajib agar fitur ketik/klik berfungsi
+"use client";
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation"; // 1. IMPORT ROUTER
 
-// 1. DATA KAMAR
-const roomsData = [
-  {
-    id: "panji",
-    name: "Panji Room",
-    category: "Superior",
-    price: "Rp 450.000",
-    desc: "Dirancang dengan sentuhan modern yang efisien, Panji Room menawarkan kenyamanan tanpa kompromi. Pilihan tepat bagi pelancong aktif.",
-    facilities: ["24 m² Size", "Queen Bed", "Smart TV", "Rain Shower"],
-    image: "https://images.unsplash.com/photo-1611892440504-42a792e24d32?q=80&w=2070&auto=format&fit=crop",
-    link: "/kamar/panji"
-  },
-  {
-    id: "lovina",
-    name: "Lovina Room",
-    category: "Deluxe",
-    price: "Rp 650.000",
-    desc: "Menghadirkan ruang yang lebih lega dengan nuansa relaksasi. Dilengkapi balkon pribadi untuk menikmati udara segar dan pemandangan taman.",
-    facilities: ["32 m² Size", "King Bed", "Private Balcony", "Work Desk"],
-    image: "https://images.unsplash.com/photo-1591088398332-8a7791972843?q=80&w=1974&auto=format&fit=crop",
-    link: "/kamar/lovina"
-  },
-  {
-    id: "buleleng",
-    name: "Buleleng Suite",
-    category: "Suite",
-    price: "Rp 1.250.000",
-    desc: "Definisi kemewahan tertinggi. Dilengkapi ruang tamu terpisah, bathtub, dan amenitas premium untuk pengalaman tak terlupakan.",
-    facilities: ["56 m² Size", "Bathtub", "Living Room", "Minibar"],
-    image: "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?q=80&w=2070&auto=format&fit=crop",
-    link: "/kamar/buleleng"
-  }
-];
+// Definisikan Tipe Data dari API Laravel
+type Room = {
+  id: number;
+  slug: string;
+  name: string;
+  category: string;
+  price: number;
+  description: string;
+  facilities: string[]; 
+  image: string;
+};
 
 export default function RoomsPage() {
-  // 2. STATE
+  const router = useRouter(); // 2. INISIALISASI ROUTER
+
+  // STATE
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
 
+  // 1. FETCH DATA DARI LARAVEL SAAT PAGE LOAD
+  useEffect(() => {
+    const fetchRooms = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+        const res = await fetch(`${apiUrl}/rooms`);
+        
+        if (!res.ok) throw new Error("Gagal mengambil data");
+        
+        const data = await res.json();
+        
+        // Normalisasi data fasilitas (jaga-jaga jika string)
+        const formattedData = data.map((item: any) => ({
+            ...item,
+            facilities: typeof item.facilities === 'string' ? JSON.parse(item.facilities) : item.facilities
+        }));
+
+        setRooms(formattedData);
+      } catch (error) {
+        console.error("Error fetching rooms:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchRooms();
+  }, []);
+
+  // 2. LOGIKA BOOKING PINTAR (SATPAM DIGITAL)
+  const handleBookNow = (slug: string) => {
+    // Cek Tiket (Token)
+    const token = localStorage.getItem("token");
+
+    if (token) {
+      // SUDAH LOGIN: Langsung ke Booking
+      router.push(`/booking?room=${slug}`);
+    } else {
+      // BELUM LOGIN: Ke Login dulu
+      router.push(`/login?returnUrl=/booking?room=${slug}`);
+    }
+  };
+
   // 3. LOGIKA FILTER
-  const filteredRooms = roomsData.filter((room) => {
+  const filteredRooms = rooms.filter((room) => {
     const matchesSearch = room.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === "All" || room.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
   return (
-    // Tambahkan pt-28 (padding-top) agar Search Bar tidak tertutup Navbar
     <main className="min-h-screen bg-[#0F1619] text-white pb-20 pt-28">
       
-      {/* SEARCH & FILTER BAR (LANGSUNG DI ATAS) */}
+      {/* SEARCH & FILTER BAR */}
       <div className="max-w-7xl mx-auto px-4 md:px-10 relative z-10 mb-16">
         <div className="bg-[#1A2225] p-6 rounded-xl shadow-2xl border border-white/10 flex flex-col md:flex-row gap-4 items-center">
           
@@ -76,7 +101,6 @@ export default function RoomsPage() {
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
               className="w-full bg-[#0F1619] text-white px-4 py-3 rounded-lg border border-white/10 focus:border-[#D4AF37] focus:outline-none cursor-pointer appearance-none"
-              style={{ backgroundImage: 'none' }} 
             >
               <option value="All">Semua Kategori</option>
               <option value="Superior">Superior Class</option>
@@ -91,7 +115,11 @@ export default function RoomsPage() {
       {/* LIST KAMAR */}
       <div className="max-w-7xl mx-auto px-4 md:px-10 space-y-24">
         
-        {filteredRooms.length > 0 ? (
+        {isLoading ? (
+           <div className="text-center py-20 text-gray-400 animate-pulse">
+             Mengambil data kamar dari server...
+           </div>
+        ) : filteredRooms.length > 0 ? (
           filteredRooms.map((room, index) => (
             <div key={room.id} className={`flex flex-col ${index % 2 === 1 ? 'md:flex-row-reverse' : 'md:flex-row'} items-center gap-10 md:gap-16`}>
               
@@ -112,29 +140,37 @@ export default function RoomsPage() {
                       {room.category}
                     </span>
                   </div>
-                  <p className="text-xl font-bold text-white">{room.price} <span className="text-sm font-normal text-gray-500">/malam</span></p>
+                  {/* Format Harga Rupiah */}
+                  <p className="text-xl font-bold text-white">
+                    {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(room.price)} 
+                    <span className="text-sm font-normal text-gray-500">/malam</span>
+                  </p>
                 </div>
                 
-                <p className="text-gray-300 leading-relaxed font-light text-lg">
-                  {room.desc}
+                <p className="text-gray-300 leading-relaxed font-light text-lg line-clamp-3">
+                  {room.description}
                 </p>
                 
+                {/* List Fasilitas */}
                 <div className="grid grid-cols-2 gap-2 text-sm text-gray-400 font-mono pt-2">
-                  {room.facilities.map((fac, i) => (
+                  {room.facilities && room.facilities.slice(0, 4).map((fac, i) => (
                     <span key={i}>• {fac}</span>
                   ))}
                 </div>
 
                 <div className="flex gap-4 pt-6">
-                  <Link href={room.link} className="border border-[#D4AF37] text-[#D4AF37] px-8 py-3 rounded hover:bg-[#D4AF37] hover:text-white transition duration-300 font-bold uppercase text-sm">
+                  {/* Link Detail (Disesuaikan ke /rooms/) */}
+                  <Link href={`/rooms/${room.slug}`} className="border border-[#D4AF37] text-[#D4AF37] px-8 py-3 rounded hover:bg-[#D4AF37] hover:text-white transition duration-300 font-bold uppercase text-sm">
                     Detail
                   </Link>
-                  <Link 
-                    href={`/booking?room=${room.id}`}
-                    className="bg-[#9F8034] text-white px-8 py-3 rounded hover:bg-[#8A6E2A] transition duration-300 font-bold uppercase text-sm flex items-center justify-center"
+                  
+                  {/* TOMBOL BOOKING PINTAR */}
+                  <button 
+                    onClick={() => handleBookNow(room.slug)}
+                    className="bg-[#9F8034] text-white px-8 py-3 rounded hover:bg-[#8A6E2A] transition duration-300 font-bold uppercase text-sm flex items-center justify-center shadow-lg"
                   >
                     Book Now
-                  </Link>
+                  </button>
                 </div>
               </div>
 

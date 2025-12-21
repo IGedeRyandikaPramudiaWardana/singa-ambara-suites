@@ -1,75 +1,147 @@
-import Image from "next/image";
+"use client";
+
 import Link from "next/link";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function LoginPage() {
-  return (
-    <div className="min-h-screen flex items-center justify-center relative">
+function LoginForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnUrl = searchParams.get("returnUrl") || "/"; // Cek mau diarahkan kemana setelah login
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+
+      // 1. Kirim Data ke Backend
+      const res = await fetch(`${apiUrl}/login`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json" 
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Email atau password salah.");
+      }
+
+   // ... (kode sebelumnya)
+
+      // 2. SIMPAN TOKEN
+      localStorage.setItem("token", data.access_token);
+      localStorage.setItem("user_name", data.user.name);
       
-      {/* 1. Background Image (Dibuat agak gelap/blur sesuai desain) */}
-      <div 
-        className="absolute inset-0 bg-cover bg-center z-0"
-        style={{ backgroundImage: "url('https://images.unsplash.com/photo-1618773928121-c32242e63f39?q=80&w=2070&auto=format&fit=crop')" }} 
-      >
-        {/* Overlay gelap agar teks lebih kontras */}
-        <div className="absolute inset-0 bg-[#0F1619]/80 backdrop-blur-sm"></div>
-      </div>
+      // Simpan cookie opsional
+      document.cookie = `token=${data.access_token}; path=/; max-age=86400;`;
 
-      {/* 2. Kartu Login */}
-      <div className="relative z-10 bg-[#030e12] p-8 md:p-12 rounded-2xl shadow-2xl w-full max-w-md border border-white/5 mx-4">
+      // --- TAMBAHKAN BARIS INI (Kirim Sinyal ke Navbar) ---
+      window.dispatchEvent(new Event("auth-change"));
+      // ----------------------------------------------------
+
+      alert(`Selamat datang kembali, ${data.user.name}!`);
+      router.push(returnUrl);
+
+// ... (kode setelahnya)
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="w-full flex items-center justify-center p-8 md:p-16">
+      <div className="w-full max-w-md space-y-8">
         
-        {/* Logo di Tengah Atas */}
-        <div className="flex flex-col items-center mb-10">
-          <Image 
-            src="/logo-emas.png" 
-            alt="Logo Singa Ambara"
-            width={100}
-            height={100}
-            className="w-auto h-24 mb-4"
-          />
-          <h1 className="text-white text-xl font-serif tracking-widest uppercase text-center">
-            Singa Ambara <br/> <span className="text-sm tracking-[0.4em] font-light">Suites</span>
-          </h1>
+        <div className="space-y-2">
+          <Link href="/" className="text-gray-400 hover:text-[#D4AF37] text-sm mb-4 inline-block transition">
+            &larr; Kembali ke Beranda
+          </Link>
+          <h1 className="text-4xl font-serif text-[#D4AF37]">Welcome Back</h1>
+          <p className="text-gray-400">Silakan masuk untuk melanjutkan booking.</p>
         </div>
 
-        {/* Form Input */}
-        <form className="space-y-6">
-          
-          {/* Input Email */}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded text-sm text-center">
+              {error}
+          </div>
+        )}
+
+        <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-2">
-            <label className="text-gray-300 text-sm ml-1">E-mail</label>
+            <label className="text-sm text-gray-400 uppercase tracking-widest">Email Address</label>
             <input 
               type="email" 
-              placeholder="Masukkan email Anda"
-              className="w-full bg-transparent border border-[#D4AF37] text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent transition placeholder-gray-600"
+              required
+              className="w-full bg-[#1A2225] border border-gray-700 rounded p-3 text-white focus:border-[#D4AF37] focus:outline-none transition"
+              placeholder="email@contoh.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
           </div>
 
-          {/* Input Password */}
           <div className="space-y-2">
-            <label className="text-gray-300 text-sm ml-1">Password</label>
+            <label className="text-sm text-gray-400 uppercase tracking-widest">Password</label>
             <input 
               type="password" 
-              placeholder="Masukkan password"
-              className="w-full bg-transparent border border-[#D4AF37] text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D4AF37] focus:border-transparent transition placeholder-gray-600"
+              required
+              className="w-full bg-[#1A2225] border border-gray-700 rounded p-3 text-white focus:border-[#D4AF37] focus:outline-none transition"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
           </div>
 
-          {/* Tombol Login */}
           <button 
-            type="button" // Ganti 'submit' jika sudah ada fungsi backend
-            className="w-full bg-[#9F8034] hover:bg-[#8A6E2A] text-white font-bold py-3 rounded-lg uppercase tracking-wide transition duration-300 mt-8 shadow-lg"
+            type="submit" 
+            disabled={isLoading}
+            className="w-full bg-[#9F8034] hover:bg-[#8A6E2A] text-white py-4 rounded font-bold uppercase tracking-widest transition duration-300 disabled:opacity-50"
           >
-            Login
+            {isLoading ? "Memproses..." : "Sign In"}
           </button>
-
-          {/* Link Kembali (Opsional) */}
-          <div className="text-center mt-6">
-            <Link href="/" className="text-gray-500 text-sm hover:text-[#D4AF37] transition">
-              &larr; Kembali ke Beranda
-            </Link>
-          </div>
-
         </form>
+
+        <p className="text-center text-gray-400 text-sm">
+          Belum punya akun?{" "}
+          <Link href="/register" className="text-[#D4AF37] hover:underline">
+            Daftar Sekarang
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// --- PEMBUNGKUS UTAMA (Wajib untuk Next.js App Router) ---
+export default function LoginPage() {
+  return (
+    <div className="min-h-screen bg-[#0F1619] flex md:grid md:grid-cols-2">
+      {/* KONTEN KIRI (FORM) */}
+      <Suspense fallback={<div className="text-white p-10">Loading...</div>}>
+        <LoginForm />
+      </Suspense>
+
+      {/* KONTEN KANAN (GAMBAR) */}
+      <div className="hidden md:block relative bg-gray-900">
+        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1618773928121-c32242e63f39?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-60"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0F1619] to-transparent"></div>
+        <div className="absolute bottom-10 left-10 p-10 max-w-lg">
+          <h2 className="text-4xl font-serif text-white mb-4">"Unlock your exclusive stay."</h2>
+          <p className="text-[#D4AF37] uppercase tracking-widest text-sm">— Singa Ambara Experience</p>
+        </div>
       </div>
     </div>
   );
