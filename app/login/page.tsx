@@ -23,11 +23,29 @@ export default function LoginPage() {
       // Kirim request login
       const res = await api.post('/login', { email, password });
       
-      // Simpan token (Contoh sederhana pakai localStorage)
+      // === BAGIAN PENTING YANG TADI HILANG ===
+      // 1. Simpan Token
       localStorage.setItem("token", res.data.access_token);
       
-      // Redirect sesuai role (Opsional, bisa dikembangkan nanti)
-      if (res.data.role === 'super_admin') {
+      // 2. Simpan Data User & Role (Agar Sidebar tahu Anda Super Admin)
+      // Pastikan backend mengirim object 'user' berisi 'name' dan 'role'
+      if (res.data.user) {
+          localStorage.setItem("user_name", res.data.user.name);
+          localStorage.setItem("user_role", res.data.user.role);
+      } else if (res.data.role) {
+          // Jaga-jaga jika struktur JSON backend berbeda (role ada di luar user)
+          localStorage.setItem("user_role", res.data.role);
+          localStorage.setItem("user_name", res.data.name || "Admin");
+      }
+
+      // 3. Kabari Navbar & Sidebar bahwa data login berubah
+      window.dispatchEvent(new Event("auth-change"));
+      
+      // 4. Redirect sesuai role
+      // Cek role dari response langsung agar lebih akurat
+      const role = res.data.user?.role || res.data.role;
+
+      if (role === 'super_admin' || role === 'admin') {
           router.push('/admin/dashboard');
       } else {
           router.push('/'); 
@@ -84,7 +102,6 @@ export default function LoginPage() {
               />
             </div>
 
-            {/* --- INI YANG KITA TAMBAHKAN: LINK LUPA PASSWORD --- */}
             <div className="flex justify-end">
                 <Link 
                     href="/forgot-password" 
@@ -93,7 +110,6 @@ export default function LoginPage() {
                     Lupa Kata Sandi?
                 </Link>
             </div>
-            {/* -------------------------------------------------- */}
 
             <button 
               type="submit" 
@@ -113,7 +129,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* BAGIAN KANAN: Gambar Hiasan (Sama seperti Register) */}
+      {/* BAGIAN KANAN: Gambar Hiasan */}
       <div className="hidden md:block relative bg-gray-900">
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1566073771259-6a8506099945?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-60"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-[#0F1619] to-transparent"></div>
