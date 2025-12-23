@@ -6,6 +6,14 @@ import Image from "next/image";
 import AdminSidebar from "@/components/AdminSidebar";
 
 // --- TIPE DATA ---
+type User = {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  created_at: string;
+};
+
 type Booking = {
   id: number;
   guest_name: string;
@@ -13,9 +21,9 @@ type Booking = {
   check_in: string;
   check_out: string;
   payment_method: string;
-  status: string; // confirmed, checked_in, checked_out, cancelled
+  status: string; 
   total_price: number;
-  room_id: number; // Pastikan backend mengirim room_id
+  room_id: number; 
   room: { name: string };
 };
 
@@ -36,15 +44,15 @@ export default function AdminDashboard() {
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [users, setUsers] = useState<User[]>([]); 
   const [searchTerm, setSearchTerm] = useState("");
 
-  // STATE EDIT STOK (Fisik)
+  // STATE EDIT STOK
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [formData, setFormData] = useState({ price: 0, total_units: 0, capacity: 0 });
   const [isSaving, setIsSaving] = useState(false);
 
-  // --- STATE BARU: TANGGAL MONITORING STOK ---
-  // Default ke hari ini agar admin langsung tau kondisi terkini
+  // STATE MONITORING
   const [monitorDate, setMonitorDate] = useState(new Date().toISOString().split('T')[0]);
 
   // 1. FETCH DATA
@@ -52,14 +60,19 @@ export default function AdminDashboard() {
     const token = localStorage.getItem("token");
     if (!token) return router.push("/login");
 
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
-      const headers = { "Authorization": `Bearer ${token}` };
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+    const headers = { "Authorization": `Bearer ${token}` };
 
+    try {
       // Fetch Bookings
       const resBooking = await fetch(`${apiUrl}/admin/bookings`, { headers });
-      if (resBooking.ok) setBookings(await resBooking.json());
-      else router.push("/");
+      if (resBooking.ok) {
+          setBookings(await resBooking.json());
+      } else if (resBooking.status === 401) {
+          localStorage.clear();
+          router.push("/login");
+          return;
+      }
 
       // Fetch Rooms
       const resRooms = await fetch(`${apiUrl}/rooms`);
@@ -73,6 +86,16 @@ export default function AdminDashboard() {
         }));
         setRooms(formattedRooms);
       }
+
+      // Fetch Users (Super Admin Only)
+      // Kita pakai try-catch terpisah agar jika forbidden (403), dashboard tetap jalan
+      const resUsers = await fetch(`${apiUrl}/admin/users`, { headers });
+      if (resUsers.ok) {
+          setUsers(await resUsers.json());
+      } else {
+          setUsers([]); // Jika bukan super admin, kosongkan list
+      }
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -84,34 +107,25 @@ export default function AdminDashboard() {
     fetchData();
   }, []);
 
-  // 2. HELPER: HITUNG KETERSEDIAAN PADA TANGGAL TERTENTU
+  // 2. HELPER & HANDLERS
+
+  // A. Ketersediaan Kamar
   const getRoomAvailability = (roomId: number, totalPhysical: number) => {
-     // Cari booking yang AKTIF pada tanggal 'monitorDate'
-     // Status: confirmed (sudah bayar) atau checked_in (sedang menginap)
      const activeBookings = bookings.filter(b => {
-        const isSameRoom = b.room_id === roomId || (b.room && b.room.name === rooms.find(r => r.id === roomId)?.name); // Fallback matching
+        const isSameRoom = b.room_id === roomId || (b.room && b.room.name === rooms.find(r => r.id === roomId)?.name); 
         const isValidStatus = ['confirmed', 'paid', 'checked_in'].includes(b.status);
         
-        // Logika Tanggal Overlap
-        // Booking dianggap memakan stok jika:
-        // CheckIn <= MonitorDate < CheckOut
-        // (Checkout date tidak dihitung karena tamu keluar jam 12 siang, malamnya bisa dipakai orang lain)
         const checkIn = new Date(b.check_in);
         const checkOut = new Date(b.check_out);
         const current = new Date(monitorDate);
         
         const isDateOccupied = current >= checkIn && current < checkOut;
-
         return isSameRoom && isValidStatus && isDateOccupied;
      });
-
-     const occupied = activeBookings.length;
-     const available = totalPhysical - occupied;
-
-     return { occupied, available };
+     return { occupied: activeBookings.length, available: totalPhysical - activeBookings.length };
   };
 
-  // 3. LOGIKA UPDATE STATUS & EDIT KAMAR
+  // B. Update Status Booking
   const handleUpdateStatus = async (id: number, newStatus: string) => {
     if (!confirm(`Update status booking #${id}?`)) return;
     const token = localStorage.getItem("token");
@@ -124,6 +138,7 @@ export default function AdminDashboard() {
     fetchData();
   };
 
+  // C. Edit Kamar
   const handleEditRoomClick = (room: Room) => {
       setEditingRoom(room);
       setFormData({ price: room.price, total_units: room.total_units, capacity: room.capacity });
@@ -148,6 +163,47 @@ export default function AdminDashboard() {
               alert("Gagal update kamar.");
           }
       } catch (error) { console.error(error); } finally { setIsSaving(false); }
+  };
+
+  // D. Manage Users (Super Admin)
+  const handleChangeRole = async (id: number, currentRole: string) => {
+    // Logic toggle: jika user -> admin, jika admin -> user
+    const newRole = currentRole === 'admin' ? 'user' : 'admin';
+    if(!confirm(`Ubah role user ini menjadi ${newRole}?`)) return;
+    
+    const token = localStorage.getItem("token");
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+    
+    const res = await fetch(`${apiUrl}/admin/users/${id}/role`, {
+        method: 'PUT',
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole })
+    });
+
+    if(res.ok) {
+        alert("Role berhasil diubah!");
+        fetchData(); 
+    } else {
+        alert("Gagal mengubah role. Anda mungkin bukan Super Admin.");
+    }
+  };
+
+  const handleDeleteUser = async (id: number) => {
+    if(!confirm("Yakin ingin menghapus user ini permanen?")) return;
+    
+    const token = localStorage.getItem("token");
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+    
+    const res = await fetch(`${apiUrl}/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: { "Authorization": `Bearer ${token}` }
+    });
+
+    if(res.ok) {
+        fetchData();
+    } else {
+        alert("Gagal menghapus user.");
+    }
   };
 
   // FILTER LIST
@@ -177,18 +233,18 @@ export default function AdminDashboard() {
             <div>
                 <h2 className="text-3xl font-bold text-gray-800 capitalize">
                     {activeTab === 'dashboard' ? 'Overview Dashboard' : 
+                     activeTab === 'users' ? 'Manajemen Pengguna' :
                      activeTab === 'checkin' ? 'Jadwal Check-In' :
                      activeTab === 'checkout' ? 'Jadwal Check-Out' :
                      activeTab === 'rooms' ? 'Monitoring Stok & Harga' : 'Laporan Keuangan'}
                 </h2>
                 <p className="text-gray-500 mt-1">
-                    {activeTab === 'rooms' ? 'Pantau ketersediaan kamar per tanggal.' : 'Ringkasan data hotel Anda.'}
+                    {activeTab === 'users' ? 'Atur role user dan admin.' : 'Ringkasan data hotel Anda.'}
                 </p>
             </div>
-            {/* Search Bar Umum */}
-            {activeTab !== 'dashboard' && activeTab !== 'rooms' && (
+            {activeTab !== 'dashboard' && activeTab !== 'rooms' && activeTab !== 'users' && (
                 <div className="relative">
-                    <input type="text" placeholder="Cari tamu..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 rounded-lg border border-gray-300 focus:border-[#D4AF37] focus:outline-none text-sm w-64"/>
+                    <input type="text" placeholder="Cari data..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 rounded-lg border border-gray-300 focus:border-[#D4AF37] focus:outline-none text-sm w-64"/>
                     <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
                 </div>
             )}
@@ -196,94 +252,105 @@ export default function AdminDashboard() {
 
         {/* --- KONTEN DINAMIS --- */}
 
-        {/* A. DASHBOARD UTAMA */}
+        {/* 1. DASHBOARD */}
         {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-green-500">
-                    <p className="text-gray-500 text-xs font-bold uppercase">Total Pendapatan</p>
+                    <p className="text-gray-500 text-xs font-bold uppercase">Pendapatan</p>
                     <h3 className="text-2xl font-bold mt-1">
                         {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(bookings.filter(b=>b.status!=='cancelled').reduce((a,b)=>a+b.total_price,0))}
                     </h3>
                 </div>
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-[#D4AF37]">
-                    <p className="text-gray-500 text-xs font-bold uppercase">Tamu Check-In</p>
-                    <h3 className="text-2xl font-bold mt-1">{bookings.filter(b=>b.status==='confirmed').length} <span className="text-sm font-normal text-gray-400">Orang</span></h3>
+                    <p className="text-gray-500 text-xs font-bold uppercase">Check-In Hari Ini</p>
+                    <h3 className="text-2xl font-bold mt-1">{bookings.filter(b=>b.status==='confirmed').length}</h3>
                 </div>
                 <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500">
-                    <p className="text-gray-500 text-xs font-bold uppercase">Sedang Menginap</p>
-                    <h3 className="text-2xl font-bold mt-1">{bookings.filter(b=>b.status==='checked_in').length} <span className="text-sm font-normal text-gray-400">Kamar</span></h3>
+                    <p className="text-gray-500 text-xs font-bold uppercase">Kamar Terisi</p>
+                    <h3 className="text-2xl font-bold mt-1">{bookings.filter(b=>b.status==='checked_in').length}</h3>
+                </div>
+                <div className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-purple-500">
+                    <p className="text-gray-500 text-xs font-bold uppercase">Total User</p>
+                    <h3 className="text-2xl font-bold mt-1">{users.length}</h3>
                 </div>
             </div>
         )}
 
-        {/* B. KELOLA KAMAR (UPDATED: DENGAN FILTER TANGGAL) */}
-        {activeTab === 'rooms' ? (
+        {/* 2. USER MANAGEMENT (SUPER ADMIN ONLY) */}
+        {activeTab === 'users' && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                    <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200">
+                        <tr><th className="p-4">Nama</th><th className="p-4">Email</th><th className="p-4">Role</th><th className="p-4">Terdaftar</th><th className="p-4 text-center">Aksi</th></tr>
+                    </thead>
+                    <tbody className="text-sm divide-y divide-gray-100">
+                        {users.length > 0 ? users.map((u) => (
+                            <tr key={u.id} className="hover:bg-gray-50 transition">
+                                <td className="p-4 font-bold text-gray-800">{u.name}</td>
+                                <td className="p-4 text-gray-600">{u.email}</td>
+                                <td className="p-4">
+                                    <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-orange-100 text-orange-700' : u.role === 'super_admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-50 text-blue-700'}`}>
+                                        {u.role.replace('_', ' ')}
+                                    </span>
+                                </td>
+                                <td className="p-4 text-gray-500 text-xs">{new Date(u.created_at).toLocaleDateString()}</td>
+                                <td className="p-4 flex justify-center gap-2">
+                                    {u.role !== 'super_admin' && (
+                                        <>
+                                            <button onClick={() => handleChangeRole(u.id, u.role)} className={`px-3 py-1 rounded text-xs font-bold text-white transition ${u.role === 'user' ? 'bg-green-600 hover:bg-green-700' : 'bg-orange-500 hover:bg-orange-600'}`}>
+                                                {u.role === 'user' ? '⬆️ Promote Admin' : '⬇️ Demote User'}
+                                            </button>
+                                            <button onClick={() => handleDeleteUser(u.id)} className="bg-red-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-700 transition">
+                                                🗑️
+                                            </button>
+                                        </>
+                                    )}
+                                    {u.role === 'super_admin' && <span className="text-xs text-gray-400 italic">Master</span>}
+                                </td>
+                            </tr>
+                        )) : (
+                            <tr><td colSpan={5} className="p-8 text-center text-gray-400">Anda tidak memiliki akses atau data kosong.</td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        )}
+
+        {/* 3. KELOLA KAMAR */}
+        {activeTab === 'rooms' && (
              <div className="space-y-6">
-                 
-                 {/* Filter Tanggal Monitoring */}
                  <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex items-center gap-4">
                     <span className="font-bold text-gray-700">📅 Cek Ketersediaan Tanggal:</span>
-                    <input 
-                        type="date" 
-                        value={monitorDate}
-                        onChange={(e) => setMonitorDate(e.target.value)}
-                        className="border border-gray-300 rounded p-2 focus:border-[#D4AF37] outline-none"
-                    />
-                    <span className="text-xs text-gray-500 italic ml-auto">
-                        *Menampilkan sisa kamar real-time berdasarkan booking yang masuk.
-                    </span>
+                    <input type="date" value={monitorDate} onChange={(e) => setMonitorDate(e.target.value)} className="border border-gray-300 rounded p-2 focus:border-[#D4AF37] outline-none"/>
                  </div>
-
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {rooms.map((room) => {
-                        // HITUNG SISA STOK DINAMIS
                         const { occupied, available } = getRoomAvailability(room.id, room.total_units);
-                        
                         return (
                             <div key={room.id} className="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200 group">
                                 <div className="relative h-48 w-full">
-                                    <Image src={room.image} alt={room.name} fill className="object-cover group-hover:scale-105 transition duration-500"/>
+                                    <Image src={room.image} alt={room.name} fill className="object-cover"/>
                                     <div className="absolute top-3 right-3 bg-white/90 backdrop-blur px-3 py-1 rounded-full text-xs font-bold shadow-sm">ID: {room.id}</div>
                                 </div>
-                                
                                 <div className="p-5">
                                     <h3 className="text-xl font-bold mb-4 text-[#0F1619]">{room.name}</h3>
                                     <div className="space-y-3 text-sm text-gray-600 mb-6 bg-gray-50 p-4 rounded-lg border border-gray-100">
-                                        <div className="flex justify-between items-center border-b pb-2 mb-2">
-                                            <span>Harga:</span>
-                                            <span className="font-bold text-[#D4AF37]">
-                                                {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(room.price)}
-                                            </span>
-                                        </div>
-                                        
-                                        {/* INFO STOK DINAMIS */}
-                                        <div className="flex justify-between items-center text-gray-500">
-                                            <span>Total Aset Fisik:</span>
-                                            <span className="font-bold">{room.total_units} Unit</span>
-                                        </div>
-                                        <div className="flex justify-between items-center text-red-500">
-                                            <span>Terisi tgl {monitorDate}:</span>
-                                            <span className="font-bold">-{occupied} Booking</span>
-                                        </div>
-                                        <div className="flex justify-between items-center pt-2 border-t mt-2">
-                                            <span className="font-bold text-gray-800">SISA TERSEDIA:</span>
-                                            <span className={`font-bold px-3 py-1 rounded ${available > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                {available} Unit
-                                            </span>
-                                        </div>
+                                        <div className="flex justify-between items-center border-b pb-2"><span>Harga:</span><span className="font-bold text-[#D4AF37]">{new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(room.price)}</span></div>
+                                        <div className="flex justify-between items-center text-gray-500"><span>Aset Fisik:</span><span className="font-bold">{room.total_units} Unit</span></div>
+                                        <div className="flex justify-between items-center text-red-500"><span>Terisi:</span><span className="font-bold">-{occupied}</span></div>
+                                        <div className="flex justify-between items-center pt-2 border-t mt-2"><span className="font-bold">SISA:</span><span className={`font-bold px-3 py-1 rounded ${available > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{available} Unit</span></div>
                                     </div>
-                                    <button onClick={() => handleEditRoomClick(room)} className="w-full bg-[#1A2225] text-white py-2 rounded font-bold hover:bg-[#D4AF37] transition shadow-md flex justify-center items-center gap-2">
-                                        ✏️ Edit Aset Fisik & Harga
-                                    </button>
+                                    <button onClick={() => handleEditRoomClick(room)} className="w-full bg-[#1A2225] text-white py-2 rounded font-bold hover:bg-[#D4AF37] transition shadow-md">✏️ Edit</button>
                                 </div>
                             </div>
                         );
                     })}
                  </div>
              </div>
-        ) : (
-            /* C. TABEL BOOKING (TAB LAIN) */
-            activeTab !== 'dashboard' && (
+        )}
+
+        {/* 4. TABEL BOOKING */}
+        {activeTab !== 'dashboard' && activeTab !== 'users' && activeTab !== 'rooms' && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <table className="w-full text-left border-collapse">
                     <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b border-gray-200">
@@ -306,17 +373,17 @@ export default function AdminDashboard() {
                     </tbody>
                 </table>
             </div>
-            )
         )}
+
       </div>
 
-      {/* MODAL EDIT (Sama seperti sebelumnya) */}
+      {/* MODAL EDIT KAMAR */}
       {editingRoom && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white p-8 rounded-2xl w-full max-w-lg shadow-2xl relative">
             <h3 className="text-2xl font-bold mb-4">Edit {editingRoom.name}</h3>
             <div className="space-y-4">
-              <div><label className="block text-sm font-bold mb-1">Total Aset Fisik (Permanen)</label><input type="number" value={formData.total_units} onChange={(e)=>setFormData({...formData, total_units:parseInt(e.target.value)})} className="w-full p-2 border rounded"/></div>
+              <div><label className="block text-sm font-bold mb-1">Total Aset Fisik</label><input type="number" value={formData.total_units} onChange={(e)=>setFormData({...formData, total_units:parseInt(e.target.value)})} className="w-full p-2 border rounded"/></div>
               <div><label className="block text-sm font-bold mb-1">Harga (IDR)</label><input type="number" value={formData.price} onChange={(e)=>setFormData({...formData, price:parseInt(e.target.value)})} className="w-full p-2 border rounded"/></div>
               <div><label className="block text-sm font-bold mb-1">Kapasitas</label><input type="number" value={formData.capacity} onChange={(e)=>setFormData({...formData, capacity:parseInt(e.target.value)})} className="w-full p-2 border rounded"/></div>
             </div>

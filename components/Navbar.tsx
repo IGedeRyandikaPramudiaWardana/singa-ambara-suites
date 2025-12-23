@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import api from '@/lib/axios'; // Pastikan import axios instance
 
 // --- TYPE DEFINITIONS ---
 interface Booking {
@@ -28,10 +29,7 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
 
-  // ============================================================
   // 1. LOGIKA HIDE: JANGAN TAMPIL DI HALAMAN ADMIN
-  // Navbar Tamu ini akan menghilang jika URL diawali '/admin'
-  // ============================================================
   if (pathname?.startsWith('/admin')) {
     return null; 
   }
@@ -41,8 +39,19 @@ export default function Navbar() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState<"booking" | "profile">("booking"); 
 
-  // STATE USER
+  // STATE USER & PROFILE
   const [userName, setUserName] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null); // Tambah State Email
+  const [userRole, setUserRole] = useState<string | null>(null);
+  
+  // STATE GANTI PASSWORD
+  const [passData, setPassData] = useState({
+      current_password: "",
+      new_password: "",
+      new_password_confirmation: ""
+  });
+  const [passMsg, setPassMsg] = useState({ type: "", text: "" });
+  const [isSavingPass, setIsSavingPass] = useState(false);
   
   // STATE DATA BOOKING
   const [bookings, setBookings] = useState<Booking[]>([]); 
@@ -54,17 +63,34 @@ export default function Navbar() {
   const [paymentMethod, setPaymentMethod] = useState("BCA Virtual Account");
 
   // ==========================================
-  // 2. SINYAL LOGIN/LOGOUT
+  // 2. SINYAL LOGIN/LOGOUT & FETCH PROFIL
   // ==========================================
+  
+  // Fungsi ambil data user terbaru dari API
+  const fetchUserProfile = async () => {
+    try {
+        const res = await api.get('/user');
+        setUserName(res.data.name);
+        setUserEmail(res.data.email);
+        setUserRole(res.data.role);
+    } catch (error) {
+        console.error("Gagal load profile", error);
+        // Jika token invalid, logout otomatis
+        handleLogout();
+    }
+  };
+
   useEffect(() => {
     const checkLoginStatus = () => {
-      const storedUser = localStorage.getItem("user_name");
       const storedToken = localStorage.getItem("token");
       
-      if (storedUser && storedToken) {
-        setUserName(storedUser);
+      if (storedToken) {
+        // Panggil API untuk dapat data terbaru
+        fetchUserProfile();
       } else {
         setUserName(null);
+        setUserEmail(null);
+        setUserRole(null);
       }
     };
 
@@ -76,7 +102,7 @@ export default function Navbar() {
   }, []);
 
   // ==========================================
-  // 3. FETCH REAL DATA SAAT SIDEBAR DIBUKA
+  // 3. FETCH REAL DATA BOOKING
   // ==========================================
   useEffect(() => {
     if (isSidebarOpen && activeMenu === 'booking' && userName) {
@@ -86,19 +112,10 @@ export default function Navbar() {
 
   const fetchRealBookings = async () => {
     setIsLoadingData(true);
-    const token = localStorage.getItem("token");
-    if (!token) return;
-
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
-      const res = await fetch(`${apiUrl}/my-bookings`, {
-        headers: { "Authorization": `Bearer ${token}` }
-      });
+      const res = await api.get('/my-bookings');
       
-      if (res.ok) {
-        const data = await res.json();
-        
-        const mappedData: Booking[] = data.map((item: any) => {
+      const mappedData: Booking[] = res.data.map((item: any) => {
            let statusColor = "text-green-600";
            let bgStatus = "bg-green-50";
            
@@ -131,7 +148,6 @@ export default function Navbar() {
         });
 
         setBookings(mappedData);
-      }
     } catch (err) {
       console.error("Gagal ambil booking:", err);
     } finally {
@@ -139,7 +155,27 @@ export default function Navbar() {
     }
   };
 
-  // 4. SCROLL SPY LOGIC
+  // ==========================================
+  // 4. FUNGSI GANTI PASSWORD
+  // ==========================================
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPassMsg({ type: "", text: "" });
+    setIsSavingPass(true);
+
+    try {
+        await api.post('/update-password', passData);
+        setPassMsg({ type: "success", text: "Password berhasil diubah!" });
+        setPassData({ current_password: "", new_password: "", new_password_confirmation: "" });
+    } catch (error: any) {
+        const errorMsg = error.response?.data?.message || "Gagal mengubah password.";
+        setPassMsg({ type: "error", text: errorMsg });
+    } finally {
+        setIsSavingPass(false);
+    }
+  };
+
+  // 5. SCROLL SPY LOGIC
   useEffect(() => {
     if (pathname !== '/') return;
     const handleScroll = () => {
@@ -158,12 +194,13 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [pathname]);
 
-  // 5. RESET STATE SAAT SIDEBAR DITUTUP
+  // 6. RESET STATE SAAT SIDEBAR DITUTUP
   useEffect(() => {
     if (!isSidebarOpen) {
       setTimeout(() => {
         setSelectedBooking(null);
         setPaymentStep('none');
+        setPassMsg({ type: "", text: "" }); // Reset pesan error password
       }, 300);
     }
   }, [isSidebarOpen]);
@@ -179,12 +216,12 @@ export default function Navbar() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("user_name");
-    localStorage.removeItem("token");
+    localStorage.clear(); 
     window.dispatchEvent(new Event("auth-change")); 
     setUserName(null);
+    setUserEmail(null);
+    setUserRole(null);
     setIsSidebarOpen(false);
-    alert("Logout Berhasil!");
     router.push("/");
   };
 
@@ -273,7 +310,9 @@ export default function Navbar() {
                 <h2 className="text-lg font-bold text-gray-800 leading-tight">
                     {userName || "Guest User"}
                 </h2>
-                <p className="text-xs text-gray-500">Member Area</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">
+                    {userRole === 'super_admin' ? 'Super Admin' : userRole === 'admin' ? 'Hotel Admin' : 'Member Area'}
+                </p>
              </div>
           </div>
           <button onClick={() => setIsSidebarOpen(false)} className="text-gray-400 hover:text-red-500 transition p-2 bg-white rounded-full shadow-sm">
@@ -299,9 +338,8 @@ export default function Navbar() {
               👤 Edit Profile
             </button>
 
-            {/* --- TOMBOL RAHASIA ADMIN --- */}
-            {/* Hanya muncul jika nama user adalah 'Resepsionis' */}
-            {userName === "Resepsionis" && (
+            {/* --- TOMBOL ADMIN PANEL DINAMIS --- */}
+            {(userRole === "admin" || userRole === "super_admin") && (
                 <Link 
                     href="/admin/dashboard" 
                     onClick={() => setIsSidebarOpen(false)}
@@ -438,7 +476,7 @@ export default function Navbar() {
                                 </div>
                               </div>
                               
-                              {/* Info Pembayaran Tambahan (NEW) */}
+                              {/* Info Pembayaran Tambahan */}
                               <div className="grid grid-cols-2 gap-4 border-t border-dashed border-gray-200 pt-3">
                                  <div>
                                      <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Metode Bayar</p>
@@ -471,7 +509,7 @@ export default function Navbar() {
               </div>
             )}
 
-            {/* --- KONTEN: PROFILE --- */}
+            {/* --- KONTEN: PROFILE (SEKARANG DINAMIS & ADA GANTI PASSWORD) --- */}
             {activeMenu === 'profile' && (
               <div className="space-y-6 transition-opacity duration-300 ease-in opacity-100">
                 <h3 className="text-lg font-bold text-gray-800 mb-4 border-b border-gray-100 pb-2">Pengaturan Akun</h3>
@@ -483,16 +521,66 @@ export default function Navbar() {
                       </div>
                   </div>
                   
-                  <div className="space-y-4">
+                  {/* FORM DATA DIRI (READ ONLY) */}
+                  <div className="space-y-4 mb-8">
                     <div>
                         <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Nama Lengkap</label>
                         <input type="text" value={userName || ""} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#9F8034]" readOnly />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Email</label>
-                        <input type="email" value="user@example.com" className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#9F8034]" readOnly />
+                        <input type="email" value={userEmail || "Memuat email..."} className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#9F8034]" readOnly />
                     </div>
                   </div>
+
+                  {/* FORM GANTI PASSWORD (BARU) */}
+                  <div className="border-t border-gray-100 pt-6">
+                     <h4 className="text-sm font-bold text-gray-800 mb-4">Ubah Kata Sandi</h4>
+                     
+                     {passMsg.text && (
+                        <div className={`p-2 mb-3 rounded text-xs ${passMsg.type === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                           {passMsg.text}
+                        </div>
+                     )}
+
+                     <form onSubmit={handleChangePassword} className="space-y-4">
+                        <div>
+                            <label className="text-xs text-gray-500 mb-1 block">Password Lama</label>
+                            <input 
+                                type="password" required 
+                                value={passData.current_password}
+                                onChange={e => setPassData({...passData, current_password: e.target.value})}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-[#9F8034] outline-none"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs text-gray-500 mb-1 block">Password Baru</label>
+                            <input 
+                                type="password" required minLength={8}
+                                value={passData.new_password}
+                                onChange={e => setPassData({...passData, new_password: e.target.value})}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-[#9F8034] outline-none"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs text-gray-500 mb-1 block">Ulangi Password Baru</label>
+                            <input 
+                                type="password" required
+                                value={passData.new_password_confirmation}
+                                onChange={e => setPassData({...passData, new_password_confirmation: e.target.value})}
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-[#9F8034] outline-none"
+                            />
+                        </div>
+                        <button 
+                            type="submit" 
+                            disabled={isSavingPass}
+                            className="w-full bg-[#0B1215] text-white py-2 rounded-lg text-sm font-bold hover:bg-black transition disabled:opacity-50"
+                        >
+                            {isSavingPass ? "Menyimpan..." : "Simpan Password Baru"}
+                        </button>
+                     </form>
+                  </div>
+
                 </div>
               </div>
             )}

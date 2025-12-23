@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import api from "@/lib/axios"; // Pastikan Anda sudah membuat file lib/axios.ts
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -11,6 +12,7 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState(""); // <--- STATE BARU
   
   // State untuk loading & error handling
   const [isLoading, setIsLoading] = useState(false);
@@ -21,32 +23,37 @@ export default function RegisterPage() {
     setIsLoading(true);
     setError("");
 
-    try {
-      // 1. Tentukan URL API (Gunakan Env variable atau hardcode sementara)
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+    // 1. Validasi di Frontend: Cek kecocokan password
+    if (password !== passwordConfirmation) {
+        setError("Konfirmasi password tidak cocok!");
+        setIsLoading(false);
+        return;
+    }
 
-      // 2. Kirim data ke Backend Laravel
-      const res = await fetch(`${apiUrl}/register`, {
-        method: "POST",
-        headers: { 
-            "Content-Type": "application/json",
-            "Accept": "application/json" 
-        },
-        body: JSON.stringify({ name, email, password }),
+    try {
+      // 2. Kirim data ke Backend Laravel menggunakan AXIOS
+      // Axios otomatis mengirim header JSON dan menangani URL dasar
+      await api.post('/register', {
+        name,
+        email,
+        password,
+        password_confirmation: passwordConfirmation // <--- WAJIB DIKIRIM
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || "Registrasi gagal. Email mungkin sudah dipakai.");
-      }
-
-      // 3. Jika sukses, arahkan ke Login
-      alert("Registrasi Berhasil! Silakan Login dengan akun baru Anda.");
-      router.push("/login");
+      // 3. Jika sukses
+      alert("Registrasi Berhasil! Silakan cek email Anda untuk kode OTP.");
+      
+      // Redirect ke halaman OTP dengan membawa email agar user tidak perlu ketik ulang
+      router.push(`/verify-otp?email=${encodeURIComponent(email)}`);
 
     } catch (err: any) {
-      setError(err.message);
+      // Menangani error dari Axios
+      if (err.response && err.response.data) {
+        // Pesan error dari Laravel (misal: "The email has already been taken.")
+        setError(err.response.data.message || "Registrasi gagal.");
+      } else {
+        setError("Gagal menghubungi server. Pastikan backend menyala.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -111,6 +118,19 @@ export default function RegisterPage() {
               />
             </div>
 
+            {/* --- INPUT BARU: KONFIRMASI PASSWORD --- */}
+            <div className="space-y-2">
+              <label className="text-sm text-gray-400 uppercase tracking-widest">Konfirmasi Password</label>
+              <input 
+                type="password" 
+                required
+                className="w-full bg-[#1A2225] border border-gray-700 rounded p-3 text-white focus:border-[#D4AF37] focus:outline-none transition"
+                placeholder="Ulangi password Anda"
+                value={passwordConfirmation}
+                onChange={(e) => setPasswordConfirmation(e.target.value)}
+              />
+            </div>
+
             <button 
               type="submit" 
               disabled={isLoading}
@@ -129,7 +149,7 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* BAGIAN KANAN: Gambar Hiasan */}
+      {/* BAGIAN KANAN: Gambar Hiasan (Tetap Sama) */}
       <div className="hidden md:block relative bg-gray-900">
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-60"></div>
         <div className="absolute inset-0 bg-gradient-to-r from-[#0F1619] to-transparent"></div>
