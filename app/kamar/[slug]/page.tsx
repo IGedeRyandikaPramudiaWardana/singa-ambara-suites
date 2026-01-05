@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation"; 
 import api from "@/lib/axios"; // Menggunakan Axios
+import { Metadata } from "next";
 
 type Room = {
   id: number;
@@ -16,6 +17,19 @@ type Room = {
   facilities: string[];
   image: string;
 };
+
+export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
+  // Fetch data kamar dari API (Server Side)
+  const product = await fetch(`https://api.singa-ambara-suites.web.id/api/rooms/${params.slug}`).then((res) => res.json());
+ 
+  return {
+    title: product.name,
+    description: product.description.substring(0, 160), // Ambil 160 karakter pertama deskripsi
+    openGraph: {
+      images: [product.image], // Agar saat di-share di WA/FB muncul gambar kamarnya
+    },
+  }
+}
 
 export default function RoomDetail() {
   const params = useParams();

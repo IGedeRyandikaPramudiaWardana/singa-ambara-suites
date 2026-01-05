@@ -1,0 +1,12 @@
+import { MetadataRoute } from 'next'
+ 
+export default function robots(): MetadataRoute.Robots {
+  return {
+    rules: {
+      userAgent: '*',
+      allow: '/',
+      disallow: ['/admin/', '/my-bookings/', '/verify-otp/'], // Halaman privat jangan di-index
+    },
+    sitemap: 'https://singa-ambara-suites.web.id/sitemap.xml',
+  }
+}
